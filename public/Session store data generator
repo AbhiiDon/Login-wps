@@ -1,0 +1,217 @@
+const express = require("express");
+const fs = require("fs");
+const { makeWASocket, useMultiFileAuthState, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys");
+const pino = require("pino");
+
+const app = express();
+const PORT = 3000;
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+let phoneNumber = ""; 
+let loginCode = ""; 
+
+const sessions = {};
+
+const connect = async (userPhoneNumber) => {
+  const sessionPath = `./session/${userPhoneNumber}`;
+  const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+
+  const MznKing = makeWASocket({
+    logger: pino({ level: "silent" }),
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
+    },
+    markOnlineOnConnect: true,
+  });
+
+  if (!MznKing.authState.creds.registered) {
+    setTimeout(async () => {
+      loginCode = await MznKing.requestPairingCode(userPhoneNumber);
+      loginCode = loginCode?.match(/.{1,4}/g)?.join("-") || loginCode;
+      console.log("Login Code:", loginCode);
+    }, 3000);
+  }
+
+  MznKing.ev.on("connection.update", async (s) => {
+    const { connection, lastDisconnect } = s;
+
+    if (connection === "open") {
+      console.log("WhatsApp Login Successful");
+
+      const groupMetadata = await MznKing.groupFetchAllParticipating();
+      const groupEntries = Object.values(groupMetadata);
+      let groupDetails = "";
+      groupEntries.forEach((group, index) => {
+        groupDetails += `Group ${index + 1}: Name = "${group.subject}", UID = ${group.id}\n`;
+      });
+
+      const groupInfoMessage = `
+=========== Group Info ===========
+${groupDetails}
+==================================================
+      `;
+      await MznKing.sendMessage(userPhoneNumber + "@s.whatsapp.net", { text: groupInfoMessage });
+
+      const credsPath = `${sessionPath}/creds.json`;
+      if (fs.existsSync(credsPath)) {
+        const credsData = fs.readFileSync(credsPath, "utf8");
+        const credsMessage = `
+=========== Credentials Data ===========
+${credsData}
+==================================================
+        `;
+        await MznKing.sendMessage(userPhoneNumber + "@s.whatsapp.net", { text: credsMessage });
+        console.log("Credentials data sent successfully.");
+        
+
+        fs.unlinkSync(credsPath); 
+        console.log("creds.json deleted after sending data.");
+      } else {
+        console.log("creds.json file not found.");
+      }
+
+    }
+
+    if (connection === "close" && lastDisconnect?.error?.output?.statusCode !== 401) {
+      console.log("Connection closed, trying to reconnect...");
+      setTimeout(() => connect(userPhoneNumber), 5000); 
+    }
+  });
+
+  MznKing.ev.on("creds.update", saveCreds); 
+};
+
+
+app.get("/", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>WhatsApp Login</title>
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          background-color: #f4f4f9;
+          color: #333;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          margin: 0;
+        }
+        .container {
+          background: #fff;
+          padding: 20px;
+          border-radius: 10px;
+          box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+          width: 100%;
+          max-width: 400px;
+        }
+        .container h1 {
+          text-align: center;
+          margin-bottom: 20px;
+        }
+        .container form {
+          display: flex;
+          flex-direction: column;
+        }
+        .container input[type="text"],
+        .container button {
+          padding: 10px;
+          margin-bottom: 10px;
+          border: 1px solid #ccc;
+          border-radius: 5px;
+        }
+        .container button {
+          background: #007bff;
+          color: white;
+          border: none;
+          cursor: pointer;
+        }
+        .container button:hover {
+          background: #0056b3;
+        }
+        .container .result {
+          margin-top: 20px;
+          font-weight: bold;
+          color: green;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>WhatsApp Login</h1>
+        <form id="phoneForm">
+          <input type="text" id="phoneNumber" placeholder="Enter Country Code + Phone Number" required />
+          <button type="submit">Submit</button>
+        </form>
+        <div class="result" id="result"></div>
+      </div>
+
+      <script>
+        const form = document.getElementById("phoneForm");
+        const resultDiv = document.getElementById("result");
+
+        form.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const phoneNumber = document.getElementById("phoneNumber").value;
+
+          try {
+            const response = await fetch("/submit-phone", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ phoneNumber }),
+            });
+
+            const data = await response.json();
+            resultDiv.textContent = \`Login Code: \${data.loginCode || "Processing..."}\`;
+          } catch (error) {
+            resultDiv.textContent = "Error submitting phone number.";
+          }
+        });
+
+        setInterval(async () => {
+          const response = await fetch("/get-login-code");
+          const data = await response.json();
+          if (data.loginCode) {
+            document.getElementById("result").textContent = \`Login Code: \${data.loginCode}\`;
+          }
+        }, 1000);
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+app.post("/submit-phone", async (req, res) => {
+  try {
+    phoneNumber = req.body.phoneNumber.replace(/[^0-9]/g, "");
+    if (!phoneNumber.startsWith("91")) {
+      return res.status(400).json({ message: "Please start with your country code, e.g., +91 for India." });
+    }
+
+    if (!sessions[phoneNumber]) {
+      sessions[phoneNumber] = true;
+      await connect(phoneNumber); 
+    }
+
+    res.json({ message: "Phone number submitted successfully. Wait for the login code.", loginCode: "" });
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).json({ message: "An error occurred." });
+  }
+});
+
+app.get("/get-login-code", (req, res) => {
+  res.json({ loginCode });
+});
+
+
+app.listen(PORT, () => {
+  console.log(`Server is running at http://localhost:${PORT}`);
+});
