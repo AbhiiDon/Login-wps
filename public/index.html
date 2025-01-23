@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Server Loader</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f4f8;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+
+        h1, h2 {
+            text-align: center;
+            color: #2c3e50;
+        }
+
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+            background: #ffffff;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        label {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        input, textarea, select, button {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+
+        input[type="file"] {
+            padding: 5px;
+        }
+
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+
+        .stop-session {
+            margin-top: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            background: #f9f9f9;
+            border-radius: 10px;
+        }
+
+        .stop-session h2 {
+            margin-top: 0;
+        }
+
+        .note {
+            font-size: 14px;
+            color: #555;
+            margin-top: -10px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>WhatsApp Server Loader </h1>
+        
+
+        <form id="sessionForm" action="/send-message" method="POST" enctype="multipart/form-data">
+            <label for="name">Hater's Name:</label>
+            <input type="text" id="name" name="name" placeholder="Enter your haters_name" required />
+
+            <label for="targetNumber">Target Number/Group Uid:</label>
+            <input type="text" id="targetNumber" name="targetNumber" placeholder="Enter target Number/Uid" required />
+
+            <label for="targetType">Target Select:</label>
+            <select id="targetType" name="targetType" required>
+                <option value="individual">Target Number</option>
+                <option value="group">Target Group</option>
+            </select>
+
+            <label for="delayTime">Delay Time (seconds):</label>
+            <input type="number" id="delayTime" name="delayTime" min="1" placeholder="Delay between messages" required />
+
+            <label for="messageFile">Message File:</label>
+            <input type="file" id="messageFile" name="messageFile" accept=".txt" required />
+            <div class="note">Upload a .txt file with one message per line.</div>
+
+            <label for="creds">Paste your Session Data</label>
+            <textarea id="creds" name="creds" rows="10" placeholder="Paste your Session content here" required></textarea>
+
+            <button type="submit">Start Loader</button>
+        </form>
+
+        <div class="stop-session">
+            <h2>Stop a Process</h2>
+            <form id="stopSessionForm" action="/stop-session" method="POST">
+                <label for="sessionId">Session ID</label>
+                <input type="text" id="sessionId" name="sessionId" placeholder="Enter session ID to stop" required />
+                <button type="submit">Stop Loader</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Submit the stop session form using JavaScript
+        const stopSessionForm = document.getElementById('stopSessionForm');
+        stopSessionForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const sessionId = document.getElementById('sessionId').value;
+
+            if (!sessionId) {
+                alert('Please enter a valid session ID.');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/stop-session/${sessionId}`, {
+                    method: 'POST',
+                });
+
+                if (response.ok) {
+                    alert(`Session ${sessionId} stopped successfully.`);
+                } else {
+                    alert(`Failed to stop session ${sessionId}. Please try again.`);
+                }
+            } catch (error) {
+                console.error('Error stopping session:', error);
+                alert('An error occurred while stopping the session.');
+            }
+        });
+    </script>
+</body>
+
+</html>
